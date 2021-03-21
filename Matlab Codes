@@ -1,1 +1,176 @@
 
+%%
+clear all;
+load handel.mat;
+load LPF.mat;
+load LPF2.mat;
+prompt = 'Please Enter The Sampling Frequency Value? ';
+Fs = input(prompt);
+prompt = 'Please Enter The The quantization level of the sampled voice signal in bits per sample (bps)? ';
+nBits = input(prompt);
+prompt = 'Please Enter The Carrier Frequency Value? ';
+Fc = input(prompt);
+prompt = 'Please Enter The UPSAMPLING (L)Value? ';
+L = input(prompt);
+prompt = 'Please Enter duration that we want to transmit? ';
+signalDuration = input(prompt);
+
+
+
+for c = 1:signalDuration
+%%
+% get audio data
+%[y,Fs] = audioread('430_dnm.wav');
+
+recObj = audiorecorder(Fs,nBits,1);
+recordblocking(recObj, 2);
+y = getaudiodata(recObj);
+voice=y;
+%sound(voice,Fs);
+clear y ;
+%%
+%Plot the input voice
+subplot(2,1,1);
+plot(voice);
+title('Time domain speech signal plot');
+xlabel('Sample Number');
+ylabel('Sample Value');
+hold off;
+
+subplot(2,1,2); 
+plot(abs(fft(voice)));
+xlabel('Sample Number');
+ylabel('Sample Value');
+title('Abs of frequency domain speech signal plot');
+hold off;
+
+
+
+%%
+z = [0];
+delayVoice =  vertcat( z , voice );
+clear z;
+%%
+%Calculate Cos Part of Transmitter Side
+transmitterCosPart = downsample(voice,2);
+clear voice;
+transmitterCosPart = upsample(transmitterCosPart,L);
+
+len     = length(transmitterCosPart);
+t       = (0:len - 1) / Fs;  % time in seconds
+freq    = Fc;
+signal  = cos(2 * pi * freq * t);
+transmitterCosPart = transmitterCosPart.*signal';
+clear signal;
+clear t ;
+clear freq ;
+clear len ;
+
+%%
+%Calculate Sin Part of Transmitter Side
+transmitterSinPart = downsample(delayVoice,2);
+clear delayVoice;
+transmitterSinPart = upsample(transmitterSinPart,L);
+
+
+len     = length(transmitterSinPart);
+t       = (0:len - 1) / Fs;  % time in seconds
+freq    = Fc;
+signal  = sin(2 * pi * freq * t);
+transmitterSinPart = transmitterSinPart.*signal';
+clear signal;
+clear t ;
+clear freq ;
+clear len ;
+
+%%
+% Now add two array SUM BLOCKS
+  if length(transmitterSinPart) == length(transmitterCosPart)
+            sumOut = transmitterSinPart + transmitterCosPart;;
+        else
+          for i = 1:L
+              z = [0];
+              transmitterCosPart =  vertcat( z , transmitterCosPart );
+          end
+        end
+sumOut = transmitterSinPart + transmitterCosPart; 
+clear i ;
+clear z ;
+clear transmitterSinPart;
+clear transmitterCosPart;
+
+premeableOut =sumOut ; 
+clear sumOut;
+ 
+
+%% DEMODULATION START HERE
+ %lpcDecoderOut=LPC_rx_s(lpcEncoderOut);
+ voice = premeableOut ;
+
+
+%%
+%Calculate Cos Part of Transmitter Side
+
+len     = length(voice);
+t       = (0:len - 1) / Fs;  % time in seconds
+freq    = Fc;
+signal  = cos(2 * pi * freq * t);
+receiverCosPart = voice.*signal';
+clear signal;
+clear t ;
+clear freq ;
+clear len ;
+
+[b,a] = sos2tf(SOS,G);
+[b,a] = sos2tf(SOS,G);
+%freqz(b,a);
+%title(' Filter frequency response plot');
+%hold off;
+lpfCosOut = filter (b, a, receiverCosPart);
+clear receiverCosPart;
+
+ downSampleReceiverCosOut = downsample(lpfCosOut,L);
+ clear lpfCosOut;
+
+%%
+%Calculate Sin Part of Transmitter Side
+len     = length(voice);
+t       = (0:len - 1) / Fs;  % time in seconds
+freq    = Fc;
+signal  = sin(2 * pi * freq * t);
+receiverSinPart = voice.*signal';
+clear signal;
+clear t ;
+clear freq ;
+clear len ;
+
+[b,a] = sos2tf(SOS,G);
+lpfSinOut = filter (b, a, receiverSinPart);
+clear receiverSinPart;
+
+ downSampleReceiverSinOut = downsample(lpfSinOut,L);
+ clear lpfSinOut;
+ %%
+ % detector part
+ detectorReceiverCosOut = downSampleReceiverCosOut ;
+ clear downSampleReceiverCosOut;
+ detectorReceiverSinOut = downSampleReceiverSinOut;
+ clear downSampleReceiverSinOut;
+ 
+ %%
+ % Combine bits part
+
+ lenReceiver = length(detectorReceiverSinOut);
+
+ for i = 1:lenReceiver
+combineBitsOutReceiver(2*(i-1) + 1) = detectorReceiverCosOut (i) ;
+combineBitsOutReceiver(2*(i-1) + 2 ) = detectorReceiverSinOut (i);
+ end
+clear i
+
+
+%%
+combineBitsOutReceiver = 50 * combineBitsOutReceiver;
+
+sound(combineBitsOutReceiver,Fs);
+end
